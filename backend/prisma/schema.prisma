@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CLIENT
+  CLEANER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  SEARCHING
+  ASSIGNED
+  EN_ROUTE
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum PaymentStatus {
+  HELD
+  RELEASED
+  REFUNDED
+  FAILED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  phone        String   @unique
+  passwordHash String
+  name         String
+  role         Role
+  createdAt    DateTime @default(now())
+
+  cleanerProfile CleanerProfile?
+
+  clientOrders   Order[] @relation("ClientOrders")
+  cleanerOrders  Order[] @relation("CleanerOrders")
+
+  reviewsGiven    Review[] @relation("ReviewsGiven")
+  reviewsReceived Review[] @relation("ReviewsReceived")
+}
+
+model CleanerProfile {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id])
+  verified      Boolean  @default(false)
+  bio           String?
+  ratingAvg     Float    @default(0)
+  ratingCount   Int      @default(0)
+  serviceAreas  String[] // districts served, e.g. ["Мотовилихинский", "Ленинский"]
+}
+
+model Service {
+  id        String          @id @default(cuid())
+  code      String          @unique // SUPPORT, GENERAL, POST_RENOVATION, MOVING
+  name      String
+  basePrice Int             // in kopecks/rubles (rubles, integer)
+  description String?
+  options   ServiceOption[]
+  orders    Order[]
+}
+
+model ServiceOption {
+  id        String   @id @default(cuid())
+  code      String   @unique // windows, oven, fridge, balcony, ironing
+  name      String
+  price     Int
+  serviceId String?
+  service   Service? @relation(fields: [serviceId], references: [id])
+
+  orders OrderOption[]
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  clientId    String
+  client      User        @relation("ClientOrders", fields: [clientId], references: [id])
+  cleanerId   String?
+  cleaner     User?       @relation("CleanerOrders", fields: [cleanerId], references: [id])
+
+  serviceId   String
+  service     Service     @relation(fields: [serviceId], references: [id])
+  options     OrderOption[]
+
+  address     String
+  district    String
+  scheduledAt DateTime
+  status      OrderStatus @default(PENDING_PAYMENT)
+  price       Int
+
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  payment     Payment?
+  review      Review?
+}
+
+model OrderOption {
+  id        String        @id @default(cuid())
+  orderId   String
+  order     Order         @relation(fields: [orderId], references: [id])
+  optionId  String
+  option    ServiceOption @relation(fields: [optionId], references: [id])
+
+  @@unique([orderId, optionId])
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  orderId         String        @unique
+  order           Order         @relation(fields: [orderId], references: [id])
+  amount          Int
+  status          PaymentStatus @default(HELD)
+  provider        String        @default("yookassa")
+  providerPaymentId String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  orderId    String   @unique
+  order      Order    @relation(fields: [orderId], references: [id])
+  fromUserId String
+  fromUser   User     @relation("ReviewsGiven", fields: [fromUserId], references: [id])
+  toUserId   String
+  toUser     User     @relation("ReviewsReceived", fields: [toUserId], references: [id])
+  rating     Int
+  comment    String?
+  createdAt  DateTime @default(now())
+}

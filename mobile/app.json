@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "ЧистоМаркет",
+    "slug": "chistomarket",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "biz.orion-digital.chistomarket"
+    },
+    "android": {
+      "package": "biz.orion_digital.chistomarket"
+    }
+  }
+}
