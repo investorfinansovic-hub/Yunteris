@@ -54,8 +54,14 @@ async function main() {
     });
   }
 
+  await prisma.subscriptionPlan.upsert({
+    where: { code: 'BASIC' },
+    update: { name: 'Базовый', price: 2990, periodDays: 30 },
+    create: { code: 'BASIC', name: 'Базовый', price: 2990, periodDays: 30 },
+  });
+
   // eslint-disable-next-line no-console
-  console.log('Seed complete: services and options loaded.');
+  console.log('Seed complete: services, options and subscription plan loaded.');
 }
 
 main()

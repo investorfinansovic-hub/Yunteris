@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { OrderStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { PaymentsService } from '../payments/payments.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AuthUser } from '../common/current-user.decorator';
 
@@ -23,9 +23,10 @@ const ALLOWED_FROM: Record<string, OrderStatus> = {
 export class OrdersService {
   constructor(
     private prisma: PrismaService,
-    private payments: PaymentsService,
+    private subscriptions: SubscriptionsService,
   ) {}
 
+  /** Client submits a free request — it's immediately visible to subscribed cleaners in the district. */
   async create(clientId: string, dto: CreateOrderDto) {
     const service = await this.prisma.service.findUnique({
       where: { id: dto.serviceId },
@@ -51,29 +52,17 @@ export class OrdersService {
         district: dto.district,
         scheduledAt: new Date(dto.scheduledAt),
         price,
-        status: OrderStatus.PENDING_PAYMENT,
+        status: OrderStatus.SEARCHING,
         options: { create: optionIds.map((optionId) => ({ optionId })) },
       },
       include: { options: { include: { option: true } }, service: true },
     });
   }
 
-  /** Simulates a successful payment confirmation; opens the order up to cleaners. */
-  async pay(orderId: string, clientId: string) {
-    const order = await this.getOwnedByClient(orderId, clientId);
-    if (order.status !== OrderStatus.PENDING_PAYMENT) {
-      throw new BadRequestException('Заказ уже оплачен или отменён');
-    }
-
-    await this.payments.holdPayment(order.id, order.price);
-    return this.prisma.order.update({
-      where: { id: order.id },
-      data: { status: OrderStatus.SEARCHING },
-    });
-  }
-
-  /** Orders open for a cleaner to accept, scoped to their declared districts. */
+  /** Open leads for a cleaner to accept — requires an active subscription and a matching district. */
   async feed(cleanerId: string) {
+    await this.subscriptions.assertActive(cleanerId);
+
     const profile = await this.prisma.cleanerProfile.findUnique({ where: { userId: cleanerId } });
     const districtFilter = profile?.serviceAreas?.length ? { district: { in: profile.serviceAreas } } : {};
 
@@ -84,14 +73,16 @@ export class OrdersService {
     });
   }
 
-  /** Atomic accept: the WHERE clause guards against two cleaners racing the same order. */
+  /** Atomic accept: the WHERE clause guards against two cleaners racing the same lead. */
   async accept(orderId: string, cleanerId: string) {
+    await this.subscriptions.assertActive(cleanerId);
+
     const result = await this.prisma.order.updateMany({
       where: { id: orderId, status: OrderStatus.SEARCHING, cleanerId: null },
       data: { status: OrderStatus.ASSIGNED, cleanerId },
     });
     if (result.count === 0) {
-      throw new ConflictException('Заказ уже принят другим исполнителем или недоступен');
+      throw new ConflictException('Заявку уже принял другой исполнитель или она недоступна');
     }
     return this.prisma.order.findUnique({ where: { id: orderId }, include: { service: true, client: true } });
   }
@@ -106,26 +97,10 @@ export class OrdersService {
       throw new BadRequestException(`Нельзя перейти в статус ${nextStatus} из ${order.status}`);
     }
 
-    const updated = await this.prisma.order.update({
+    return this.prisma.order.update({
       where: { id: orderId },
       data: { status: NEXT_STATUS[nextStatus] },
     });
-
-    if (nextStatus === 'COMPLETED') {
-      // MVP: payment releases immediately on completion. A real dispute window
-      // (client confirms or files a claim within N hours) is a TODO.
-      await this.payments.releasePayment(orderId);
-    }
-
-    return updated;
-  }
-
-  async dispute(orderId: string, clientId: string) {
-    const order = await this.getOwnedByClient(orderId, clientId);
-    if (order.status !== OrderStatus.COMPLETED) {
-      throw new BadRequestException('Спор можно открыть только по завершённому заказу');
-    }
-    return this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.DISPUTED } });
   }
 
   async listMine(user: AuthUser) {
@@ -146,16 +121,9 @@ export class OrdersService {
   async findOne(orderId: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { service: true, options: { include: { option: true } }, client: true, cleaner: true, payment: true },
+      include: { service: true, options: { include: { option: true } }, client: true, cleaner: true },
     });
     if (!order) throw new NotFoundException('Заказ не найден');
-    return order;
-  }
-
-  private async getOwnedByClient(orderId: string, clientId: string) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
-    if (!order) throw new NotFoundException('Заказ не найден');
-    if (order.clientId !== clientId) throw new ForbiddenException('Это не ваш заказ');
     return order;
   }
 }

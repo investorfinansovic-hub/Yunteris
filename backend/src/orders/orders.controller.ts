@@ -19,12 +19,6 @@ export class OrdersController {
     return this.ordersService.create(user.userId, dto);
   }
 
-  @Post(':id/pay')
-  @Roles(Role.CLIENT)
-  pay(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.ordersService.pay(id, user.userId);
-  }
-
   @Get('feed')
   @Roles(Role.CLEANER)
   feed(@CurrentUser() user: AuthUser) {
@@ -41,12 +35,6 @@ export class OrdersController {
   @Roles(Role.CLEANER)
   updateStatus(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateOrderStatusDto) {
     return this.ordersService.updateStatus(id, user.userId, dto.status);
-  }
-
-  @Post(':id/dispute')
-  @Roles(Role.CLIENT)
-  dispute(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.ordersService.dispute(id, user.userId);
   }
 
   @Get('mine')

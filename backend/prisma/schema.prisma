@@ -14,20 +14,22 @@ enum Role {
 }
 
 enum OrderStatus {
-  PENDING_PAYMENT
-  SEARCHING
+  SEARCHING   // published, visible to subscribed cleaners in the district
   ASSIGNED
   EN_ROUTE
   IN_PROGRESS
   COMPLETED
   CANCELLED
-  DISPUTED
 }
 
-enum PaymentStatus {
-  HELD
-  RELEASED
-  REFUNDED
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum SubscriptionPaymentStatus {
+  SUCCEEDED
   FAILED
 }
 
@@ -41,32 +43,34 @@ model User {
 
   cleanerProfile CleanerProfile?
 
-  clientOrders   Order[] @relation("ClientOrders")
-  cleanerOrders  Order[] @relation("CleanerOrders")
+  clientOrders  Order[] @relation("ClientOrders")
+  cleanerOrders Order[] @relation("CleanerOrders")
 
   reviewsGiven    Review[] @relation("ReviewsGiven")
   reviewsReceived Review[] @relation("ReviewsReceived")
 }
 
 model CleanerProfile {
-  id            String   @id @default(cuid())
-  userId        String   @unique
-  user          User     @relation(fields: [userId], references: [id])
-  verified      Boolean  @default(false)
-  bio           String?
-  ratingAvg     Float    @default(0)
-  ratingCount   Int      @default(0)
-  serviceAreas  String[] // districts served, e.g. ["Мотовилихинский", "Ленинский"]
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id])
+  verified     Boolean  @default(false)
+  bio          String?
+  ratingAvg    Float    @default(0)
+  ratingCount  Int      @default(0)
+  serviceAreas String[] // districts served, e.g. ["Мотовилихинский", "Ленинский"]
+
+  subscription Subscription?
 }
 
 model Service {
-  id        String          @id @default(cuid())
-  code      String          @unique // SUPPORT, GENERAL, POST_RENOVATION, MOVING
-  name      String
-  basePrice Int             // in kopecks/rubles (rubles, integer)
+  id          String          @id @default(cuid())
+  code        String          @unique // SUPPORT, GENERAL, POST_RENOVATION, MOVING
+  name        String
+  basePrice   Int             // rubles
   description String?
-  options   ServiceOption[]
-  orders    Order[]
+  options     ServiceOption[]
+  orders      Order[]
 }
 
 model ServiceOption {
@@ -81,49 +85,36 @@ model ServiceOption {
 }
 
 model Order {
-  id          String      @id @default(cuid())
-  clientId    String
-  client      User        @relation("ClientOrders", fields: [clientId], references: [id])
-  cleanerId   String?
-  cleaner     User?       @relation("CleanerOrders", fields: [cleanerId], references: [id])
+  id        String @id @default(cuid())
+  clientId  String
+  client    User   @relation("ClientOrders", fields: [clientId], references: [id])
+  cleanerId String?
+  cleaner   User?  @relation("CleanerOrders", fields: [cleanerId], references: [id])
 
-  serviceId   String
-  service     Service     @relation(fields: [serviceId], references: [id])
-  options     OrderOption[]
+  serviceId String
+  service   Service       @relation(fields: [serviceId], references: [id])
+  options   OrderOption[]
 
   address     String
   district    String
   scheduledAt DateTime
-  status      OrderStatus @default(PENDING_PAYMENT)
-  price       Int
+  status      OrderStatus @default(SEARCHING)
+  price       Int // estimated price shown to the client; paid directly to the cleaner, off-platform
 
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  payment     Payment?
-  review      Review?
+  review Review?
 }
 
 model OrderOption {
-  id        String        @id @default(cuid())
-  orderId   String
-  order     Order         @relation(fields: [orderId], references: [id])
-  optionId  String
-  option    ServiceOption @relation(fields: [optionId], references: [id])
+  id       String        @id @default(cuid())
+  orderId  String
+  order    Order         @relation(fields: [orderId], references: [id])
+  optionId String
+  option   ServiceOption @relation(fields: [optionId], references: [id])
 
   @@unique([orderId, optionId])
-}
-
-model Payment {
-  id              String        @id @default(cuid())
-  orderId         String        @unique
-  order           Order         @relation(fields: [orderId], references: [id])
-  amount          Int
-  status          PaymentStatus @default(HELD)
-  provider        String        @default("yookassa")
-  providerPaymentId String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
 }
 
 model Review {
@@ -137,4 +128,48 @@ model Review {
   rating     Int
   comment    String?
   createdAt  DateTime @default(now())
+}
+
+/// A subscription plan cleaners pay for to see and accept leads. One default
+/// plan is seeded, but the model allows several (e.g. by district count).
+model SubscriptionPlan {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  name       String
+  price      Int // rubles per period
+  periodDays Int      @default(30)
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id               String         @id @default(cuid())
+  cleanerProfileId String         @unique
+  cleanerProfile   CleanerProfile @relation(fields: [cleanerProfileId], references: [id])
+  planId           String
+  plan             SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  status          SubscriptionStatus @default(ACTIVE)
+  currentPeriodEnd DateTime
+
+  // Recurring-billing bookkeeping — TODO: populate from a real ЮKassa
+  // rebilling integration (see billing/provider-charge.service.ts).
+  provider               String  @default("stub")
+  providerCustomerId     String?
+  providerPaymentMethodId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments SubscriptionPayment[]
+}
+
+model SubscriptionPayment {
+  id             String                    @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription              @relation(fields: [subscriptionId], references: [id])
+  amount         Int
+  status         SubscriptionPaymentStatus
+  providerPaymentId String?
+  createdAt      DateTime                  @default(now())
 }

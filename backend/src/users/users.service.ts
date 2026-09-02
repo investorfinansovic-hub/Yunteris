@@ -8,7 +8,7 @@ export class UsersService {
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { cleanerProfile: true },
+      include: { cleanerProfile: { include: { subscription: { include: { plan: true } } } } },
     });
     if (!user) throw new NotFoundException('Пользователь не найден');
     const { passwordHash: _passwordHash, ...safeUser } = user;
